@@ -78,7 +78,7 @@ public class BusTubConnector {
         BufferedReader rd = new BufferedReader
                 (new InputStreamReader(
                         response.getEntity().getContent()));
-        String line = rd.lines().collect(Collectors.joining());
+        String line = rd.lines().collect(Collectors.joining(System.lineSeparator()));
         return line;
     }
 
@@ -96,14 +96,13 @@ public class BusTubConnector {
         StringEntity requestEntity = new StringEntity(
                 obj,
                 ContentType.APPLICATION_JSON);
-        System.out.println(obj);
         httpPost.setEntity(requestEntity);
         CloseableHttpResponse response = (CloseableHttpResponse) client
                 .execute(httpPost);
         BufferedReader rd = new BufferedReader
                 (new InputStreamReader(
                         response.getEntity().getContent()));
-        String line = rd.lines().collect(Collectors.joining());
+        String line = rd.lines().collect(Collectors.joining(System.lineSeparator()));
         return line;
     }
 
@@ -116,7 +115,7 @@ public class BusTubConnector {
         BufferedReader rd = new BufferedReader
                 (new InputStreamReader(
                         response.getEntity().getContent()));
-        String line = rd.lines().collect(Collectors.joining());
+        String line = rd.lines().collect(Collectors.joining(System.lineSeparator()));
         JSONObject obj = new JSONObject(line);
         JSONArray tables = obj.getJSONArray("catalog");
         CalciteSchema schema = CalciteSchema.createRootSchema(true);

@@ -16,7 +16,6 @@ public class BusTubRelJson extends RelJson {
     public Object toJson(RexNode node) {
         Map<String, @Nullable Object> map = (Map<String, @Nullable Object>) super.toJson(node);
         map.put("outType", node.getType().toString());
-        System.out.println(node.toString());
         return map;
     }
 }
