@@ -26,6 +26,7 @@ import org.apache.calcite.rel.rules.CoreRules;
 import org.apache.calcite.rel.type.RelDataType;
 import org.apache.calcite.rel.type.RelDataTypeFactory;
 import org.apache.calcite.rex.RexBuilder;
+import org.apache.calcite.runtime.CalciteException;
 import org.apache.calcite.schema.ScannableTable;
 import org.apache.calcite.schema.SchemaPlus;
 import org.apache.calcite.schema.impl.AbstractTable;
@@ -151,90 +152,95 @@ public class BusTubConnector {
         // SELECT max(book.title) FROM book INNER JOIN author ON book.author = author.id GROUP BY book.author
 
         while (true) {
-            String input = userInput.nextLine();
-
-            CalciteSchema schema = retrieveCatalog(typeFactory);
-
-            SqlParser parser = SqlParser.create(input);
-
-            // Parse the query into an AST
-            SqlNode sqlNode;
-
             try {
-                sqlNode = parser.parseQuery();
-            } catch (SqlParseException e) {
-                System.err.println("cannot parse with Calcite, forwarding to BusTub");
-                System.out.println(runQuery(input));
-                continue;
+                String input = userInput.nextLine();
+
+                CalciteSchema schema = retrieveCatalog(typeFactory);
+
+                SqlParser parser = SqlParser.create(input);
+
+                // Parse the query into an AST
+                SqlNode sqlNode;
+
+                try {
+                    sqlNode = parser.parseQuery();
+                } catch (SqlParseException e) {
+                    System.err.println("cannot parse with Calcite, forwarding to BusTub");
+                    System.out.println(runQuery(input));
+                    continue;
+                }
+
+                // Configure and instantiate validator`
+                Properties props = new Properties();
+                props.setProperty(CalciteConnectionProperty.CASE_SENSITIVE.camelName(), "false");
+                CalciteConnectionConfig config = new CalciteConnectionConfigImpl(props);
+                CalciteCatalogReader catalogReader = new CalciteCatalogReader(schema,
+                        Collections.singletonList(""),
+                        typeFactory, config);
+
+                SqlValidator validator = SqlValidatorUtil.newValidator(SqlStdOperatorTable.instance(),
+                        catalogReader, typeFactory,
+                        SqlValidator.Config.DEFAULT);
+
+                // Validate the initial AST
+                SqlNode validNode = validator.validate(sqlNode);
+
+
+                // Configure and instantiate the converter of the AST to Logical plan (requires opt cluster)
+                RelOptCluster cluster = newCluster(typeFactory);
+                SqlToRelConverter relConverter = new SqlToRelConverter(
+                        NOOP_EXPANDER,
+                        validator,
+                        catalogReader,
+                        cluster,
+                        StandardConvertletTable.INSTANCE,
+                        SqlToRelConverter.config());
+
+                // Convert the valid AST into a logical plan
+                RelNode logPlan = relConverter.convertQuery(validNode, false, true).rel;
+
+                // Display the logical plan
+                System.out.println(
+                        RelOptUtil.dumpPlan("[Logical plan]", logPlan, SqlExplainFormat.TEXT,
+                                SqlExplainLevel.EXPPLAN_ATTRIBUTES));
+
+                // Initialize optimizer/planner with the necessary rules
+                RelOptPlanner planner = cluster.getPlanner();
+                planner.addRule(CoreRules.FILTER_INTO_JOIN);
+                planner.addRule(Bindables.BINDABLE_TABLE_SCAN_RULE);
+                planner.addRule(Bindables.BINDABLE_FILTER_RULE);
+                planner.addRule(Bindables.BINDABLE_JOIN_RULE);
+                planner.addRule(Bindables.BINDABLE_PROJECT_RULE);
+//                planner.addRule(Bindables.BINDABLE_SORT_RULE);
+                planner.addRule(Bindables.BINDABLE_AGGREGATE_RULE);
+                planner.addRule(SortConvertRule.INSTANCE);
+
+                // Define the type of the output plan (in this case we want a physical plan in
+                // BindableConvention)
+                logPlan = planner.changeTraits(logPlan,
+                        cluster.traitSet().replace(BindableConvention.INSTANCE));
+                planner.setRoot(logPlan);
+                // Start the optimization process to obtain the most efficient physical plan based on the
+                // provided rule set.
+                BindableRel phyPlan;
+
+                try {
+                    phyPlan =
+                            (BindableRel) planner.findBestExp();
+                } catch (RelOptPlanner.CannotPlanException e) {
+                    System.err.println(e);
+                    continue;
+                }
+
+                // Display the physical plan
+                System.out.println(
+                        RelOptUtil.dumpPlan("[Physical plan]", phyPlan, SqlExplainFormat.TEXT,
+                                SqlExplainLevel.NON_COST_ATTRIBUTES));
+
+                System.out.println(runPlan(phyPlan));
+            } catch (CalciteException e) {
+                System.out.println(e);
             }
-
-            // Configure and instantiate validator`
-            Properties props = new Properties();
-            props.setProperty(CalciteConnectionProperty.CASE_SENSITIVE.camelName(), "false");
-            CalciteConnectionConfig config = new CalciteConnectionConfigImpl(props);
-            CalciteCatalogReader catalogReader = new CalciteCatalogReader(schema,
-                    Collections.singletonList(""),
-                    typeFactory, config);
-
-            SqlValidator validator = SqlValidatorUtil.newValidator(SqlStdOperatorTable.instance(),
-                    catalogReader, typeFactory,
-                    SqlValidator.Config.DEFAULT);
-
-            // Validate the initial AST
-            SqlNode validNode = validator.validate(sqlNode);
-
-
-            // Configure and instantiate the converter of the AST to Logical plan (requires opt cluster)
-            RelOptCluster cluster = newCluster(typeFactory);
-            SqlToRelConverter relConverter = new SqlToRelConverter(
-                    NOOP_EXPANDER,
-                    validator,
-                    catalogReader,
-                    cluster,
-                    StandardConvertletTable.INSTANCE,
-                    SqlToRelConverter.config());
-
-            // Convert the valid AST into a logical plan
-            RelNode logPlan = relConverter.convertQuery(validNode, false, true).rel;
-
-            // Display the logical plan
-            System.out.println(
-                    RelOptUtil.dumpPlan("[Logical plan]", logPlan, SqlExplainFormat.TEXT,
-                            SqlExplainLevel.EXPPLAN_ATTRIBUTES));
-
-            // Initialize optimizer/planner with the necessary rules
-            RelOptPlanner planner = cluster.getPlanner();
-            planner.addRule(CoreRules.FILTER_INTO_JOIN);
-            planner.addRule(Bindables.BINDABLE_TABLE_SCAN_RULE);
-            planner.addRule(Bindables.BINDABLE_FILTER_RULE);
-            planner.addRule(Bindables.BINDABLE_JOIN_RULE);
-            planner.addRule(Bindables.BINDABLE_PROJECT_RULE);
-            planner.addRule(Bindables.BINDABLE_SORT_RULE);
-            planner.addRule(Bindables.BINDABLE_AGGREGATE_RULE);
-
-            // Define the type of the output plan (in this case we want a physical plan in
-            // BindableConvention)
-            logPlan = planner.changeTraits(logPlan,
-                    cluster.traitSet().replace(BindableConvention.INSTANCE));
-            planner.setRoot(logPlan);
-            // Start the optimization process to obtain the most efficient physical plan based on the
-            // provided rule set.
-            BindableRel phyPlan;
-
-            try {
-                phyPlan =
-                        (BindableRel) planner.findBestExp();
-            } catch (RelOptPlanner.CannotPlanException e) {
-                System.err.println(e);
-                continue;
-            }
-
-            // Display the physical plan
-            System.out.println(
-                    RelOptUtil.dumpPlan("[Physical plan]", phyPlan, SqlExplainFormat.TEXT,
-                            SqlExplainLevel.NON_COST_ATTRIBUTES));
-
-            System.out.println(runPlan(phyPlan));
         }
     }
 
