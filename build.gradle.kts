@@ -1,6 +1,10 @@
+import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+
 plugins {
     java
     `java-library`
+    application
+    id("com.github.johnrengelman.shadow") version "8.1.1"
 }
 
 group = "org.example"
@@ -23,4 +27,16 @@ dependencies {
 
 tasks.test {
     useJUnitPlatform()
+}
+
+
+tasks.withType<ShadowJar> {
+    archiveFileName.set("app.jar")
+    manifest {
+        attributes["mainClassName"] = "org.example.Main"
+    }
+}
+
+application {
+    mainClass = "org.example.Main"
 }

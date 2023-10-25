@@ -52,7 +52,6 @@ public class SortConvertRule extends ConverterRule {
                     convert(sort.getInput(), traitSet), sort.getCollation(), sort.fetch);
         }
 
-
         return null;
     }
 }
