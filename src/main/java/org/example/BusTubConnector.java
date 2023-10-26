@@ -54,6 +54,7 @@ import org.json.JSONObject;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.nio.charset.Charset;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -143,9 +144,16 @@ public class BusTubConnector {
         return schema;
     }
 
+    public static class BusTubRelDataTypeFactory extends JavaTypeFactoryImpl {
+        @Override
+        public Charset getDefaultCharset() {
+            return Charset.forName("UTF8");
+        }
+    }
+
     public void run() throws Exception {
         // Instantiate a type factory for creating types (e.g., VARCHAR, NUMERIC, etc.)
-        RelDataTypeFactory typeFactory = new JavaTypeFactoryImpl();
+        RelDataTypeFactory typeFactory = new BusTubRelDataTypeFactory();
 
         Scanner userInput = new Scanner(System.in);
 
